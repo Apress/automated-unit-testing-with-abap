@@ -1,0 +1,1821 @@
+program.
+*----------------------------------------------------------------------
+* Define Selection Texts as follows:
+*   Name     Text
+*   -------- -------------------------------
+*   CARRIER  Airline
+*   DISCOUNT Airfare discount percentage
+*   VIA_GRID Display using alv grid
+*   VIA_LIST Display using alv classic list
+*
+*======================================================================
+*
+*   O O   I n t e r f a c e s
+*
+*======================================================================
+interface report_writable.
+    types        : value_type     type c length 100
+                 , format_type    type c length 100
+                 .
+    methods      : new_line
+                 , write
+                     importing
+                       format
+                         type report_writable=>format_type
+                       value
+                         type report_writable=>value_type
+                 .
+endinterface.
+interface message_dispatchable.
+    types        : message_type   type symsgty
+                 , message_id     type symsgid
+                 , message_number type symsgno
+                 , message_text   type symsgv
+                 .
+    constants    : status_message type message_dispatchable=>message_type
+                                                 value 'S'
+                 , information_message
+                                  type message_dispatchable=>message_type
+                                                 value 'I'
+                 , warning_message
+                                  type message_dispatchable=>message_type
+                                                 value 'W'
+                 , error_message  type message_dispatchable=>message_type
+                                                 value 'E'
+                 , abort_message  type message_dispatchable=>message_type
+                                                 value 'A'
+                 , exit_message   type message_dispatchable=>message_type
+                                                 value 'X'
+                 .
+    methods      : issue_identified_message
+                     importing
+                       message_severity
+                         type message_dispatchable=>message_type
+                           default message_dispatchable=>status_message
+                       message_display_severity
+                         type message_dispatchable=>message_type optional
+                       id
+                         type message_dispatchable=>message_id
+                       number
+                         type message_dispatchable=>message_number
+                       text_01
+                         type message_dispatchable=>message_text
+                       text_02
+                         type message_dispatchable=>message_text optional
+                       text_03
+                         type message_dispatchable=>message_text optional
+                       text_04
+                         type message_dispatchable=>message_text optional
+                 , issue_unidentified_message
+                     importing
+                       message_severity
+                         type message_dispatchable=>message_type
+                           default message_dispatchable=>status_message
+                       message_display_severity
+                         type message_dispatchable=>message_type optional
+                       text
+                         type clike
+                 .
+endinterface.
+interface flights_organizer_testable.
+endinterface.
+interface flights_report_testable.
+endinterface.
+interface flights_organizable.
+    types        : flights_row    type sflight
+                 , flights_list   type standard table
+                                    of flights_row
+                 , carrier        type s_carr_id
+                 , counter        type int4
+                 .
+    constants    : flights_table_name
+                                  type tabname   value 'SFLIGHT'
+                 .
+    data         : flights_stack  type flights_organizable=>flights_list
+                 .
+    methods      : get_flights_via_carrier
+                     importing
+                       carrier
+                         type carrier
+                 , get_flights_count
+                     returning
+                       value(flights_count)
+                         type counter
+                 .
+endinterface.
+interface flights_reportable.
+    methods      : show_flights
+                     importing
+                       alv_style_grid
+                         type xflag
+                     changing
+                       flights_stack
+                         type flights_organizable=>flights_list
+                 .
+endinterface.
+interface service_locatable.
+    methods      : register_flights_organizer
+                     importing
+                       flights_organizer
+                         type ref
+                           to flights_organizable
+                 , register_flights_report
+                     importing
+                       flights_report
+                         type ref
+                           to flights_reportable
+                 , register_revenue_calculator
+                     importing
+                       revenue_calculator
+                         type ref
+                           to zif_flight_revenue_calculable
+                 , register_discount_calculator
+                     importing
+                       discount_calculator
+                         type funcname
+                 , register_message_dispatcher
+                     importing
+                       message_dispatcher
+                         type ref
+                           to message_dispatchable
+                 .
+endinterface.
+interface service_creatable.
+    methods      : create_all_services
+                 , create_flights_organizer
+                 , create_flights_report
+                 , create_revenue_calculator
+                 , create_discount_calculator
+                 , create_message_dispatcher
+                 .
+endinterface.
+interface service_locator_testable.
+endinterface.
+*======================================================================
+*
+*   O O   C l a s s e s
+*
+*======================================================================
+class service_locator                  definition
+                                       final
+                                       create private
+                                       friends service_locator_testable
+                                       .
+  public section.
+    interfaces   : service_locatable
+                 .
+    aliases      : register_flights_organizer
+                     for service_locatable~register_flights_organizer
+                 , register_flights_report
+                     for service_locatable~register_flights_report
+                 , register_revenue_calculator
+                     for service_locatable~register_revenue_calculator
+                 , register_discount_calculator
+                     for service_locatable~register_discount_calculator
+                 , register_message_dispatcher
+                     for service_locatable~register_message_dispatcher
+                 .
+    class-data   : singleton      type ref
+                                    to service_locator
+                                         read-only
+                 .
+    data         : flights_organizer
+                                  type ref
+                                    to flights_organizable
+                                         read-only
+                 , flights_report type ref
+                                    to flights_reportable
+                                         read-only
+                 , revenue_calculator
+                                  type ref
+                                    to zif_flight_revenue_calculable
+                                         read-only
+                 , discount_calculator
+                                  type funcname
+                 , message_dispatcher
+                                  type ref
+                                    to message_dispatchable
+                                         read-only
+                 , report_writer  type ref
+                                    to report_writable
+                                         read-only
+                 .
+    class-methods: class_constructor
+                 .
+endclass.
+class service_locator                  implementation.
+  method class_constructor.
+    create object service_locator=>singleton.
+  endmethod.
+  method register_flights_organizer.
+    me->flights_organizer         = flights_organizer.
+  endmethod.
+  method register_flights_report.
+    me->flights_report            = flights_report.
+  endmethod.
+  method register_revenue_calculator.
+    me->revenue_calculator        = revenue_calculator.
+  endmethod.
+  method register_discount_calculator.
+    me->discount_calculator       = discount_calculator.
+  endmethod.
+  method register_message_dispatcher.
+    me->message_dispatcher        = message_dispatcher.
+  endmethod.
+endclass.
+class messenger                        definition
+                                       final
+                                       .
+  public section.
+    interfaces   : message_dispatchable
+                 .
+    aliases      : issue_identified_message
+                     for message_dispatchable~issue_identified_message
+                 , issue_unidentified_message
+                     for message_dispatchable~issue_unidentified_message
+                 .
+endclass.
+class messenger                        implementation.
+  method issue_identified_message.
+    data         : message_display_type
+                                  type message_dispatchable=>message_type
+                 .
+    message_display_type          = message_display_severity.
+    if message_display_type is initial.
+      message_display_type        = message_severity.
+    endif.
+    " Issue message using message statement:
+    message id      id
+            type    message_severity
+            number  number
+            display like message_display_type
+            with    text_01
+                    text_02
+                    text_03
+                    text_04
+            .
+  endmethod.
+  method issue_unidentified_message.
+    data         : message_display_type
+                                  type message_dispatchable=>message_type
+                 .
+    message_display_type          = message_display_severity.
+    if message_display_type is initial.
+      message_display_type        = message_severity.
+    endif.
+    " Issue message using message statement:
+    message text type message_severity display like message_display_type.
+  endmethod.
+endclass.
+class messenger_test_double            definition
+                                       final
+                                       for testing
+                                       .
+  public section.
+    interfaces   : message_dispatchable
+                 .
+    aliases      : issue_identified_message
+                     for message_dispatchable~issue_identified_message
+                 , issue_unidentified_message
+                     for message_dispatchable~issue_unidentified_message
+                 .
+    types        : begin of identified_message_row
+                 ,   type         type message_dispatchable=>message_type
+                 ,   display_type type message_dispatchable=>message_type
+                 ,   id           type message_dispatchable=>message_id
+                 ,   number       type message_dispatchable=>message_number
+                 ,   text_01      type message_dispatchable=>message_text
+                 ,   text_02      type message_dispatchable=>message_text
+                 ,   text_03      type message_dispatchable=>message_text
+                 ,   text_04      type message_dispatchable=>message_text
+                 , end   of identified_message_row
+                 , identified_message_list
+                                  type standard table
+                                    of identified_message_row
+                 , begin of unidentified_message_row
+                 ,   type         type message_dispatchable=>message_type
+                 ,   display_type type message_dispatchable=>message_type
+                 ,   text         type message_dispatchable=>message_text
+                 , end   of unidentified_message_row
+                 , unidentified_message_list
+                                  type standard table
+                                    of unidentified_message_row
+                 .
+    data         : identified_message_stack
+                                  type identified_message_list
+                                         read-only
+                 , unidentified_message_stack
+                                  type unidentified_message_list
+                                         read-only
+                 .
+endclass.
+class messenger_test_double            implementation.
+  method issue_identified_message.
+    data         : identified_message_entry
+                                  like line
+                                    of identified_message_stack
+                 .
+    identified_message_entry-type
+                                  = message_severity.
+    if message_display_severity is not initial.
+      identified_message_entry-display_type
+                                  = message_display_severity.
+    else.
+      identified_message_entry-display_type
+                                  = message_severity.
+    endif.
+    identified_message_entry-id   = id.
+    identified_message_entry-number
+                                  = number.
+    identified_message_entry-text_01
+                                  = text_01.
+    identified_message_entry-text_02
+                                  = text_02.
+    identified_message_entry-text_03
+                                  = text_03.
+    identified_message_entry-text_04
+                                  = text_04.
+    append identified_message_entry
+        to identified_message_stack.
+    sy-msgty                      = identified_message_entry-type.
+    sy-msgid                      = identified_message_entry-id.
+    sy-msgno                      = identified_message_entry-number.
+    sy-msgv1                      = identified_message_entry-text_01.
+    sy-msgv2                      = identified_message_entry-text_02.
+    sy-msgv3                      = identified_message_entry-text_03.
+    sy-msgv4                      = identified_message_entry-text_04.
+  endmethod.
+  method issue_unidentified_message.
+    constants    : unidentified_message_id
+                                  type message_dispatchable=>message_id
+                                                 value '00'
+                 , unidentified_message_number
+                                  type message_dispatchable=>message_number
+                                                 value '000'
+                 .
+    data         : unidentified_message_entry
+                                  like line
+                                    of unidentified_message_stack
+                 , begin of message_content
+                 ,   text_01      type message_dispatchable=>message_text
+                 ,   text_02      type message_dispatchable=>message_text
+                 ,   text_03      type message_dispatchable=>message_text
+                 ,   text_04      type message_dispatchable=>message_text
+                 , end   of message_content
+                 .
+    unidentified_message_entry-type
+                                  = message_severity.
+    if message_display_severity is not initial.
+      unidentified_message_entry-display_type
+                                  = message_display_severity.
+    else.
+      unidentified_message_entry-display_type
+                                  = message_severity.
+    endif.
+    unidentified_message_entry-text
+                                  = text.
+    append unidentified_message_entry
+        to unidentified_message_stack.
+    sy-msgty                      = unidentified_message_entry-type.
+    sy-msgid                      = unidentified_message_id.
+    sy-msgno                      = unidentified_message_number.
+    message_content               = text.
+    sy-msgv1                      = message_content-text_01.
+    sy-msgv2                      = message_content-text_02.
+    sy-msgv3                      = message_content-text_03.
+    sy-msgv4                      = message_content-text_04.
+  endmethod.
+endclass.
+class flights_organizer                definition
+                                       final
+                                       friends flights_organizer_testable
+                                       .
+  public section.
+    interfaces   : flights_organizable
+                 .
+    aliases      : get_flights_via_carrier
+                     for flights_organizable~get_flights_via_carrier
+                 , get_flights_count
+                     for flights_organizable~get_flights_count
+                 , flights_stack
+                     for flights_organizable~flights_stack
+                 .
+endclass.
+class flights_organizer                implementation.
+  method get_flights_via_carrier.
+    clear flights_stack.
+    if carrier is not initial.
+      try.
+        select *
+          into table flights_stack
+          from (flights_organizable=>flights_table_name)
+         where carrid               eq carrier
+             .
+      catch cx_root ##NO_HANDLER ##CATCH_ALL.
+        " Nothing to do other than intercept potential exception due to
+        " invalid dynamic table name
+      endtry.
+    endif.
+  endmethod.
+  method get_flights_count.
+    describe table flights_stack lines flights_count.
+  endmethod.
+endclass.
+class flights_organizer_test_double    definition
+                                       final
+                                       create private
+                                       for testing
+                                       friends flights_organizer_testable
+                                       .
+  public section.
+    interfaces   : flights_organizable
+                 .
+    aliases      : get_flights_via_carrier
+                     for flights_organizable~get_flights_via_carrier
+                 , get_flights_count
+                     for flights_organizable~get_flights_count
+                 , flights_stack
+                     for flights_organizable~flights_stack
+                 .
+  private section.
+    constants    : lufthansa      type s_carr_id value 'LH'
+                 , united_airlines
+                                  type s_carr_id value 'UA'
+                 , american_airlines
+                                  type s_carr_id value 'AA'
+                 .
+    data         : test_flights_stack
+                                  type flights_organizable=>flights_list
+                 .
+    methods      : constructor
+                 .
+endclass.
+class flights_organizer_test_double    implementation.
+  method constructor.
+    data         : carrier_id_stack
+                                  type table
+                                    of s_carr_id
+                 , carrier_id_entry
+                                  like line
+                                    of carrier_id_stack
+                 , test_flights_entry
+                                  like line
+                                    of test_flights_stack
+                 .
+    append: lufthansa             to carrier_id_stack
+          , united_airlines       to carrier_id_stack
+          , american_airlines     to carrier_id_stack
+          .
+    test_flights_entry-mandt      = sy-mandt.
+    test_flights_entry-fldate     = sy-datum.
+    test_flights_entry-price      = 1000.
+    test_flights_entry-currency   = 'USD'.
+    test_flights_entry-planetype  = '747-400'.
+    test_flights_entry-seatsmax   = 385.
+    loop at carrier_id_stack
+       into carrier_id_entry.
+      test_flights_entry-carrid   = carrier_id_entry.
+      do 02 times.
+        add 01 to test_flights_entry-connid.
+        do 05 times.
+          add 01 to test_flights_entry-fldate.
+          test_flights_entry-seatsocc
+                                  = test_flights_entry-seatsmax - sy-index * 10.
+          test_flights_entry-paymentsum
+                                  = test_flights_entry-price
+                                  * test_flights_entry-seatsocc.
+          append test_flights_entry
+              to test_flights_stack.
+        enddo.
+      enddo.
+    endloop.
+  endmethod.
+  method get_flights_via_carrier.
+    data         : test_flights_entry
+                                  like line
+                                    of test_flights_stack
+                 .
+    clear flights_stack.
+    if carrier is not initial.
+      loop at test_flights_stack
+         into test_flights_entry
+        where carrid              eq carrier.
+        append test_flights_entry
+            to flights_stack.
+      endloop.
+    endif.
+  endmethod.
+  method get_flights_count.
+    describe table flights_stack lines flights_count.
+  endmethod.
+endclass.
+class flights_report                   definition
+                                       final
+                                       friends flights_report_testable
+                                       .
+  public section.
+    interfaces   : flights_reportable
+                 .
+    aliases      : show_flights
+                     for flights_reportable~show_flights
+                 .
+  private section.
+    methods      : set_alv_field_catalog
+                     importing
+                       structure_name
+                         type tabname
+                     changing
+                       alv_fieldcat_stack
+                         type slis_t_fieldcat_alv
+                 , set_alv_function_module_name
+                     importing
+                       alv_style_grid
+                         type xflag
+                     changing
+                       alv_display_function_module
+                         type progname
+                 .
+endclass.
+class flights_report                   implementation.
+  method show_flights.
+    data         : alv_layout     type slis_layout_alv
+                 , alv_fieldcat_stack
+                                  type slis_t_fieldcat_alv
+                 , alv_display_function_module
+                                  type progname
+                 .
+    " Set field catalog for presenting flights via ALV report:
+    call method set_alv_field_catalog
+      exporting
+        structure_name            = flights_organizable=>flights_table_name
+      changing
+        alv_fieldcat_stack        = alv_fieldcat_stack
+        .
+    if alv_fieldcat_stack is initial.
+      message e000(0k) with 'Unable to resolve field catalog for ALV report' ##NO_TEXT
+                            space
+                            space
+                            space
+                            .
+    endif.
+    " Set name of alv presentation function module based on user selection:
+    call method set_alv_function_module_name
+      exporting
+        alv_style_grid            = alv_style_grid
+      changing
+        alv_display_function_module
+                                  = alv_display_function_module
+        .
+    " Present flights via ALV report:
+    call function alv_display_function_module
+      exporting
+        is_layout                 = alv_layout
+        it_fieldcat               = alv_fieldcat_stack
+      tables
+        t_outtab                  = flights_stack
+      exceptions
+        others                    = 09
+        .
+    if sy-subrc ne 00.
+      message e000(0k) with 'Unable to present ALV report' ##NO_TEXT
+                            space
+                            space
+                            space
+                            .
+    endif.
+  endmethod.
+  method set_alv_field_catalog.
+    " Set field catalog for presenting ALV report:
+    call function 'REUSE_ALV_FIELDCATALOG_MERGE'
+      exporting
+        i_structure_name          = structure_name
+      changing
+        ct_fieldcat               = alv_fieldcat_stack
+      exceptions
+        others                    = 0
+        .
+  endmethod.
+  method set_alv_function_module_name.
+    constants    : alv_list_function_module
+                                  type progname  value 'REUSE_ALV_LIST_DISPLAY'
+                 , alv_grid_function_module
+                                  type progname  value 'REUSE_ALV_GRID_DISPLAY'
+                 .
+    " Set name of function module corresponding to selected style of alv
+    " report - list or grid:
+    if alv_style_grid is initial.
+      alv_display_function_module = alv_list_function_module.
+    else.
+      alv_display_function_module = alv_grid_function_module.
+    endif.
+  endmethod.
+endclass.
+class flights_report_old_format        definition
+                                       final
+                                       friends flights_report_testable
+                                       .
+  public section.
+    interfaces   : flights_reportable
+                 .
+    aliases      : show_flights
+                     for flights_reportable~show_flights
+                 .
+endclass.
+class flights_report_old_format        implementation.
+  method show_flights.
+    data         : flights_entry  like line
+                                    of flights_stack
+                 .
+    loop at flights_stack
+       into flights_entry.
+      new-line.
+      write: flights_entry-carrid
+           , flights_entry-connid
+           , flights_entry-fldate
+           , flights_entry-price
+           , flights_entry-currency
+           , flights_entry-planetype
+           , flights_entry-seatsmax
+           , flights_entry-seatsocc
+           , flights_entry-paymentsum
+           , flights_entry-seatsmax_b
+           , flights_entry-seatsocc_b
+           , flights_entry-seatsmax_f
+           , flights_entry-seatsocc_f
+           .
+    endloop.
+  endmethod.
+endclass.
+class flights_report_test_double       definition
+                                       final
+                                       create private
+                                       for testing
+                                       friends flights_report_testable
+                                       .
+  public section.
+    interfaces   : flights_reportable
+                 .
+    aliases      : show_flights
+                     for flights_reportable~show_flights
+                 .
+  private section.
+    data         : number_of_calls
+                                  type int4
+                 .
+    methods      : set_alv_field_catalog
+                     importing
+                       structure_name
+                         type tabname
+                     changing
+                       alv_fieldcat_stack
+                         type slis_t_fieldcat_alv
+                 , set_alv_function_module_name
+                     importing
+                       alv_style_grid
+                         type xflag
+                     changing
+                       alv_display_function_module
+                         type progname
+                 .
+endclass.
+class flights_report_test_double       implementation.
+  method show_flights.
+    add 01 to number_of_calls.
+  endmethod.
+  method set_alv_field_catalog.
+    " Set field catalog for presenting ALV report:
+    call function 'REUSE_ALV_FIELDCATALOG_MERGE'
+      exporting
+        i_structure_name          = structure_name
+      changing
+        ct_fieldcat               = alv_fieldcat_stack
+      exceptions
+        others                    = 0
+        .
+  endmethod.
+  method set_alv_function_module_name.
+    constants    : alv_list_function_module
+                                  type progname  value 'REUSE_ALV_LIST_DISPLAY'
+                 , alv_grid_function_module
+                                  type progname  value 'REUSE_ALV_GRID_DISPLAY'
+                 .
+    " Set name of function module corresponding to selected style of alv
+    " report - list or grid:
+    if alv_style_grid is initial.
+      alv_display_function_module = alv_list_function_module.
+    else.
+      alv_display_function_module = alv_grid_function_module.
+    endif.
+  endmethod.
+endclass.
+class service_factory                  definition
+                                       final
+                                       create private
+                                       .
+  public section.
+    interfaces   : service_creatable
+                 .
+    aliases      : create_all_services
+                     for service_creatable~create_all_services
+                 , create_flights_organizer
+                     for service_creatable~create_flights_organizer
+                 , create_flights_report
+                     for service_creatable~create_flights_report
+                 , create_revenue_calculator
+                     for service_creatable~create_revenue_calculator
+                 , create_discount_calculator
+                     for service_creatable~create_discount_calculator
+                 , create_message_dispatcher
+                     for service_creatable~create_message_dispatcher
+                 .
+    class-data   : singleton      type ref
+                                    to service_factory
+                                         read-only
+                 .
+    class-methods: class_constructor
+                 .
+endclass.
+class service_factory                  implementation.
+  method class_constructor.
+    create object service_factory=>singleton.
+  endmethod.
+  method create_all_services.
+    me->create_flights_organizer( ).
+    me->create_flights_report( ).
+    me->create_revenue_calculator( ).
+    me->create_discount_calculator( ).
+    me->create_message_dispatcher( ).
+  endmethod.
+  method create_flights_organizer.
+    data         : flights_organizer
+                                  type ref
+                                    to flights_organizable
+                 .
+    create object flights_organizer
+             type flights_organizer.
+    service_locator=>singleton->register_flights_organizer(
+      exporting
+        flights_organizer         = flights_organizer
+        ).
+  endmethod.
+  method create_flights_report.
+    data         : flights_report
+                                  type ref
+                                    to flights_reportable
+                 .
+    create object flights_report
+             type flights_report_old_format.
+    service_locator=>singleton->register_flights_report(
+      exporting
+        flights_report            = flights_report
+        ).
+  endmethod.
+  method create_revenue_calculator.
+    data         : revenue_calculator
+                                  type ref
+                                    to zif_flight_revenue_calculable
+                 .
+    try.
+      revenue_calculator          ?= zcl_flight_revenue_calculator=>singleton.
+    catch cx_sy_move_cast_error.
+    endtry.
+    service_locator=>singleton->register_revenue_calculator(
+      exporting
+        revenue_calculator        = revenue_calculator
+        ).
+  endmethod.
+  method create_discount_calculator.
+    constants    : discount_calculator
+                                  type funcname  value 'ZCALCULATE_DISCOUNTED_AIRFARE'
+                 .
+    service_locator=>singleton->register_discount_calculator(
+      exporting
+        discount_calculator       = discount_calculator
+        ).
+  endmethod.
+  method create_message_dispatcher.
+    data         : message_dispatcher
+                                  type ref
+                                    to message_dispatchable
+                 .
+    create object message_dispatcher
+             type messenger.
+    service_locator=>singleton->register_message_dispatcher(
+      exporting
+        message_dispatcher        = message_dispatcher
+        ).
+  endmethod.
+endclass.
+*======================================================================
+*
+*   G l o b a l   F i e l d s
+*
+*======================================================================
+types            : discount       type s_discount
+                 .
+*======================================================================
+*
+*   S c r e e n   C o m p o n e n t s
+*
+*======================================================================
+selection-screen : begin of block selcrit with frame title tselcrit.
+parameters       :   carrier      type flights_organizable=>carrier obligatory
+                 ,   discount     type discount
+                 ,   via_list     radiobutton group alv
+                 ,   via_grid     radiobutton group alv
+                 .
+selection-screen : end   of block selcrit.
+*======================================================================
+*
+*   C l a s s i c   P r o c e d u r a l   E v e n t s
+*
+*======================================================================
+initialization.
+    tselcrit                      = 'Selection criteria' ##NO_TEXT.
+    service_factory=>singleton->create_all_services( ).
+
+at selection-screen.
+    if sy-ucomm ne 'ONLI'.
+      return.
+    endif.
+    perform process_selection using discount
+                                    carrier.
+
+start-of-selection.
+
+end-of-selection.
+    perform present_report using discount
+                                 via_grid
+                                 carrier.
+*======================================================================
+*
+*   S u b r o u t i n e s
+*
+*======================================================================
+form process_selection using discount
+                               type discount
+                             carrier
+                               type flights_organizable=>carrier.
+    " Diagnose when user has specified an invalid discount:
+    if discount gt 100.
+      service_locator=>singleton->message_dispatcher->issue_identified_message(
+        exporting
+          message_severity        = message_dispatchable=>warning_message
+          id                      = '0K'
+          number                  = 000
+          text_01                 = 'Fare discount percentage exceeding 100'
+          text_03                 = 'will be ignored'
+        ).
+    endif.
+    " Get list of flights corresponding to specified carrier:
+    call method service_locator=>singleton->flights_organizer->get_flights_via_carrier
+      exporting
+        carrier                   = carrier.
+    " Diagnose when no flights for this carrier:
+    if service_locator=>singleton->flights_organizer->get_flights_count( ) le 00.
+      service_locator=>singleton->message_dispatcher->issue_identified_message(
+        exporting
+          message_severity        = message_dispatchable=>error_message
+          id                      = '0K'
+          number                  = 000
+          text_01                 = 'No flights match carrier'
+          text_03                 = conv #( carrier )
+        ).
+    endif.
+endform.
+
+form present_report using discount
+                            type discount
+                          via_grid
+                            type xflag
+                          carrier
+                            type flights_organizable=>carrier.
+    data         : flights_stack  type flights_organizable=>flights_list
+                 , flights_count  type flights_organizable=>counter
+                 .
+    flights_stack                 = service_locator=>singleton->flights_organizer->flights_stack.
+    " Adjust flights fare by specified discount:
+    perform apply_flight_discount using discount
+                               changing flights_stack.
+    " Get total revenue for flight as currently booked:
+    perform adjust_flight_revenue changing flights_stack.
+    flights_count                 = service_locator=>singleton->flights_organizer->get_flights_count( ).
+    perform show_flights_count using flights_count
+                                     carrier.
+    call method service_locator=>singleton->flights_report->show_flights
+      exporting
+        alv_style_grid            = via_grid
+      changing
+        flights_stack             = flights_stack
+        .
+endform.
+
+form show_flights_count using flights_count
+                                type int4
+                              carrier
+                                type flights_organizable=>carrier.
+    " Show a message to accompany the alv report which indicates the
+    " number of flights for the specified carrier:
+    service_locator=>singleton->message_dispatcher->issue_identified_message(
+      exporting
+        id                        = '0K'
+        number                    = 000
+        text_01                   = conv #( flights_count )
+        text_02                   = 'flights are available for carrier'
+        text_03                   = conv #( carrier )
+      ).
+endform.
+
+form apply_flight_discount using flight_discount
+                                   type discount
+                        changing flights_stack
+                                   type flights_organizable=>flights_list.
+    constants    : percent_100    type int4
+                                                 value 100
+                 .
+    field-symbols: <flights_entry>
+                                  like line
+                                    of flights_stack
+                 .
+    if flight_discount le 00.
+      return.
+    endif.
+    if flight_discount gt percent_100.
+      return.
+    endif.
+    " Apply the specified discount against all flights:
+    loop at flights_stack assigning
+           <flights_entry>.
+      call function service_locator=>singleton->discount_calculator
+        exporting
+          full_fare               = <flights_entry>-price
+          discount                = flight_discount
+        importing
+          discount_fare           = <flights_entry>-price
+        exceptions
+          others                  = 0
+          .
+    endloop.
+endform.
+
+form adjust_flight_revenue changing flights_stack
+                                      type flights_organizable=>flights_list.
+    field-symbols: <flights_entry>
+                                  like line
+                                    of flights_stack
+                 .
+    " Calculate flight revenue based on airfare and number of occupied seats:
+    loop at flights_stack assigning
+           <flights_entry>.
+      call method service_locator=>singleton->revenue_calculator->get_flight_revenue
+        exporting
+          fare_price              = <flights_entry>-price
+          number_of_passengers    = <flights_entry>-seatsocc
+        importing
+          flight_revenue          = <flights_entry>-paymentsum
+          .
+    endloop.
+endform.
+
+*======================================================================
+*
+*   A B A P   U n i t   T e s t   c o m p o n e n t s
+*
+*======================================================================
+class service_locator_test_helper      definition
+                                       final
+                                       for testing
+                                       .
+  public section.
+    interfaces   : service_locator_testable
+                 .
+    methods      : clear_all_service_locators
+                 .
+endclass.
+class service_locator_test_helper      implementation.
+  method clear_all_service_locators.
+    clear: service_locator=>singleton->flights_organizer
+         , service_locator=>singleton->flights_report
+         , service_locator=>singleton->revenue_calculator
+         , service_locator=>singleton->discount_calculator
+         , service_locator=>singleton->message_dispatcher
+         .
+    cl_abap_unit_assert=>assert_not_bound(
+      act                         = service_locator=>singleton->flights_organizer
+      ).
+    cl_abap_unit_assert=>assert_not_bound(
+      act                         = service_locator=>singleton->flights_report
+      ).
+    cl_abap_unit_assert=>assert_not_bound(
+      act                         = service_locator=>singleton->revenue_calculator
+      ).
+    cl_abap_unit_assert=>assert_initial(
+      act                         = service_locator=>singleton->discount_calculator
+      ).
+    cl_abap_unit_assert=>assert_not_bound(
+      act                         = service_locator=>singleton->message_dispatcher
+      ).
+  endmethod.
+endclass.
+class tester                           definition
+                                       final
+                                       for testing
+                                       risk level harmless
+                                       duration short
+                                       .
+  public section.
+    interfaces   : flights_organizer_testable
+                 , flights_report_testable
+                 .
+  private section.
+    constants    : bogus_message_type
+                                  type symsgty   value '?'
+                 , bogus_message_id
+                                  type symsgid   value '?'
+                 , bogus_message_number
+                                  type symsgno   value 999
+                 , bogus_message_variable
+                                  type symsgv    value '?'
+                 , lufthansa      type s_carr_id value 'LH'
+                 , united_airlines
+                                  type s_carr_id value 'UA'
+                 , american_airlines
+                                  type s_carr_id value 'AA'
+                 .
+    methods      : set_alv_field_catalog
+                     for testing
+                 , get_flights_via_carrier
+                     for testing
+                 , get_flights_count
+                     for testing
+                 , set_alv_function_module_name
+                     for testing
+                 , apply_flight_discount_over_100
+                     for testing
+                 , apply_flight_discount_50
+                     for testing
+                 , adjust_flight_revenue
+                     for testing
+                 , show_flights_count
+                     for testing
+                 , present_report
+                     for testing
+                 , set_bogus_message
+                 , assert_message_is_bogus
+                 , assert_message_not_bogus
+                 , show_flights
+                     for testing
+                 , setup
+                 , teardown
+                 , process_selection_bad_values
+                     for testing
+                 , process_selection_bad_discount
+                     for testing
+                 , process_selection_bad_carrier
+                     for testing
+                 , process_selection_good_carrier
+                     for testing
+                 .
+endclass.
+class tester                           implementation.
+  method setup.
+    data         : flights_organizer_test_double
+                                  type ref
+                                    to flights_organizable
+                 , flights_report_test_double
+                                  type ref
+                                    to flights_reportable
+                 , messenger_test_double
+                                  type ref
+                                    to message_dispatchable
+                 .
+    service_factory=>singleton->create_all_services( ).
+    " To prevent the possibility of interacting tests, refresh all singleton objects:
+    create object flights_organizer_test_double
+             type flights_organizer_test_double.
+    create object flights_report_test_double
+             type flights_report_test_double.
+    " Register flights_organizer_test_double=>singleton as flights_organizer service:
+    service_locator=>singleton->register_flights_organizer(
+      exporting
+        flights_organizer         = flights_organizer_test_double
+      ).
+    " Register flights_report_test_double=>singleton as flights_report service:
+*    service_locator=>singleton->register_flights_report(
+*      exporting
+*        flights_report            = flights_report_test_double
+*      ).
+    carrier                       = american_airlines.
+    call method service_locator=>singleton->flights_organizer->get_flights_via_carrier
+      exporting
+        carrier                   = carrier
+        .
+    " Instantiate messenger_test_double:
+    create object messenger_test_double
+             type messenger_test_double.
+    " Register messenger_test_double as message_dispatcher service:
+    service_locator=>singleton->register_message_dispatcher(
+      exporting
+        message_dispatcher        = messenger_test_double
+      ).
+  endmethod.
+  method teardown.
+    clear service_locator=>singleton->flights_organizer->flights_stack.
+    cl_abap_unit_assert=>assert_initial(
+      act                         = service_locator=>singleton->flights_organizer->flights_stack
+      msg                         = 'Teardown method finds table flights_stack is not empty'
+      ).
+  endmethod.
+  method process_selection_bad_values.
+    constants    : bogus_carrier  type flights_organizable=>carrier
+                                                 value '??'
+                 .
+    data         : messenger_test_double
+                                  type ref
+                                    to messenger_test_double
+                 , identified_message_entry
+                                  like line
+                                    of messenger_test_double->identified_message_stack
+                 , error_message_count
+                                  type int4
+                 , warning_message_count
+                                  type int4
+                 .
+    set_bogus_message( ).
+    assert_message_is_bogus( ).
+    perform process_selection using 110
+                              bogus_carrier.
+    " With these specified calling parameters, both a warning message and
+    " an error message should be issued by subroutine process_selection,
+    " so the message content should be changed:
+    assert_message_not_bogus( ).
+    " We also should find that there are two identified messages registered in the
+    " messenger_test_double; one is a warning message and the other is an error message:
+    try.
+      messenger_test_double       ?= service_locator=>singleton->message_dispatcher.
+    catch cx_sy_move_cast_error.
+      cl_abap_unit_assert=>fail(
+        msg                       = 'Caught exception in test method process_selection_bad_values'
+        ).
+    endtry.
+    cl_abap_unit_assert=>assert_equals(
+      act                         = lines( messenger_test_double->identified_message_stack )
+      exp                         = 02
+      msg                         = 'Unexpected number of messages held by messenger test double'
+      ).
+    loop at messenger_test_double->identified_message_stack
+       into                        identified_message_entry.
+      case identified_message_entry-type.
+        when message_dispatchable=>error_message.
+          add 01 to error_message_count.
+        when message_dispatchable=>warning_message.
+          add 01 to warning_message_count.
+      endcase.
+    endloop.
+    cl_abap_unit_assert=>assert_equals(
+      act                         = error_message_count
+      exp                         = 01
+      msg                         = 'Unexpected number of error messages held by messenger test double'
+      ).
+    cl_abap_unit_assert=>assert_equals(
+      act                         = warning_message_count
+      exp                         = 01
+      msg                         = 'Unexpected number of warning messages held by messenger test double'
+      ).
+  endmethod.
+  method process_selection_bad_discount.
+    set_bogus_message( ).
+    assert_message_is_bogus( ).
+    perform process_selection using 110
+                              american_airlines.
+    " With these specified calling parameters, a warning message should be issued by
+    " subroutine process_selection, so the message content should be changed:
+    assert_message_not_bogus( ).
+  endmethod.
+  method process_selection_bad_carrier.
+    constants    : bogus_carrier  type flights_organizable=>carrier
+                                                 value '??'
+                 .
+    set_bogus_message( ).
+    assert_message_is_bogus( ).
+    perform process_selection using 00
+                              bogus_carrier.
+    " With these specified calling parameters, an error message should be issued by
+    " subroutine process_selection, so the message content should be changed:
+    assert_message_not_bogus( ).
+  endmethod.
+  method process_selection_good_carrier.
+    set_bogus_message( ).
+    assert_message_is_bogus( ).
+    perform process_selection using 00
+                              american_airlines.
+    " With these specified calling parameters, no message should be issued by
+    " subroutine process_selection, so the message content should remain unchanged:
+    assert_message_is_bogus( ).
+  endmethod.
+  method set_alv_field_catalog.
+    data         : alv_fieldcat_stack
+                                  type slis_t_fieldcat_alv
+                 , flights_reportable
+                                  type ref
+                                    to flights_report_test_double
+                 .
+    " Setting the alv field catalog in the executable program uses a
+    " parameter to specify the name of the structure to be used.  If
+    " this name is invalid, no field catalog entries will result.  Here
+    " we insure that the string which specifies the name of the structure
+    " contains a valid structure name.
+    try.
+      flights_reportable          ?= service_locator=>singleton->flights_report.
+    catch cx_sy_move_cast_error.
+      cl_abap_unit_assert=>fail(
+        msg                       = 'Caught exception in test method set_alv_field_catalog'
+        ).
+    endtry.
+    call method flights_reportable->set_alv_field_catalog
+      exporting
+        structure_name            = flights_organizable=>flights_table_name
+      changing
+        alv_fieldcat_stack        = alv_fieldcat_stack
+        .
+    cl_abap_unit_assert=>assert_not_initial(
+      act                         = alv_fieldcat_stack
+      msg                         = 'ALV fieldcatalog is empty'
+      ).
+  endmethod.
+  method get_flights_via_carrier.
+    data         : failure_message
+                                  type string
+                 , flights_entry  like line
+                                    of service_locator=>singleton->flights_organizer->flights_stack
+                 , carrier_id_stack
+                                  type table
+                                    of s_carr_id
+                 , carrier_id_entry
+                                  like line
+                                    of carrier_id_stack
+                 .
+    " This unit test is modelled after the example unit test presented
+    " in the book "ABAP Objects - ABAP Programming in SAP NetWeaver",
+    " 2nd edition, by Horst Keller and Sascha Kruger (Galileo Press,
+    " 2007, ISBN 978-1-59229-079-6).  Refer to the sample listing 13.3
+    " starting on page 964.  Here we insure that the list of flights
+    " retrieved contains only those flights for the specified carrier.
+    append: lufthansa             to carrier_id_stack
+          , united_airlines       to carrier_id_stack
+          , american_airlines     to carrier_id_stack
+          .
+    loop at carrier_id_stack
+       into carrier_id_entry.
+      " Confirm applicable test records exist in this environment:
+      concatenate 'No records found for carrier'
+                  carrier_id_entry
+                  'in environment'
+                  sy-sysid
+                  sy-mandt
+             into failure_message separated by space.
+      carrier                     = carrier_id_entry.
+      call method service_locator=>singleton->flights_organizer->get_flights_via_carrier
+        exporting
+          carrier                 = carrier
+          .
+      cl_abap_unit_assert=>assert_not_initial(
+        act                       = service_locator=>singleton->flights_organizer->flights_stack
+        msg                       = failure_message
+        level                     = cl_aunit_assert=>tolerable
+        quit                      = cl_aunit_assert=>no
+        ).
+      concatenate 'Selection of'
+                  carrier_id_entry
+                  'gives different airlines'
+             into failure_message separated by space.
+      " We have specified a quit parameter for the next assertion.
+      " The default action is to terminate the test method upon encountering
+      " an error.  We do not want to terminate this test method with the
+      " first error because we intend to run this test for multiple carriers
+      " as identified in the outer loop, allowing ABAP Unit test errors to
+      " be issued for whichever carriers they apply.
+      " Notice also that the vale specified for the quit parameter is a
+      " constant defined in class cl_aunit_assert.  Class cl_aunit_assert
+      " is the name of the first generation of ABAP Unit assertion class.
+      " It still exists and still can be used, but SAP has since superseded
+      " this class with the more descriptively named assertion class
+      " cl_abap_unit_assert.  We are using the old class name here because its
+      " static attributes were not made available to class cl_abap_unit_assert.
+      loop at service_locator=>singleton->flights_organizer->flights_stack
+         into flights_entry.
+        cl_abap_unit_assert=>assert_equals(
+          act                     = flights_entry-carrid
+          exp                     = carrier_id_entry
+          msg                     = failure_message
+          quit                    = cl_aunit_assert=>no
+          ).
+        if flights_entry-carrid ne carrier_id_entry.
+          exit. " loop at flights_stack
+        endif.
+      endloop.
+    endloop.
+  endmethod.
+  method get_flights_count.
+    data         : flights_organizable
+                                  type ref
+                                    to flights_organizer_test_double
+                 .
+    clear service_locator=>singleton->flights_organizer->flights_stack.
+    cl_abap_unit_assert=>assert_equals(
+      act                         = service_locator=>singleton->flights_organizer->get_flights_count( )
+      exp                         = 00
+      msg                         = 'Flights stack is not initial'
+      ).
+    try.
+      flights_organizable         ?= service_locator=>singleton->flights_organizer.
+    catch cx_sy_move_cast_error.
+      cl_abap_unit_assert=>fail(
+        msg                       = 'Caught exception in test method get_flights_count'
+        ).
+    endtry.
+    service_locator=>singleton->flights_organizer->flights_stack
+                                  = flights_organizable->test_flights_stack.
+    cl_abap_unit_assert=>assert_equals(
+      act                         = service_locator=>singleton->flights_organizer->get_flights_count( )
+      exp                         = lines( flights_organizable->test_flights_stack )
+      msg                         = 'Flights stack does not have expected number of entries'
+      ).
+  endmethod.
+  method set_alv_function_module_name.
+    constants    : list_flag      type xflag     value space
+                 , grid_flag      type xflag     value 'X'
+                 .
+    data         : alv_display_function_module
+                                  type progname
+                 , flights_reportable
+                                  type ref
+                                    to flights_report_test_double
+                 .
+    " The user may select to display the report using alv classic list
+    " or alv grid control.  The function modules facilitating these use
+    " the same parameter interface and the name of each one contains the
+    " string "LIST" or "GRID" respectively.  Here we insure that we
+    " get the correct function module name resolved when we provide the
+    " flag indicating whether or not to use the grid control.
+    try.
+      flights_reportable          ?= service_locator=>singleton->flights_report.
+    catch cx_sy_move_cast_error.
+      cl_abap_unit_assert=>fail(
+        msg                       = 'Caught exception in test method set_alv_function_module_name'
+        ).
+    endtry.
+    call method flights_reportable->set_alv_function_module_name
+      exporting
+        alv_style_grid            = list_flag
+      changing
+        alv_display_function_module
+                                  = alv_display_function_module
+        .
+    " Here we use the level parameter to indicate that although we may
+    " get the incorrect name of the function module based on the selection
+    " flag, it is not a critial error (the default for not specifying level).
+    cl_abap_unit_assert=>assert_char_cp(
+          act                     = alv_display_function_module
+          exp                     = '*LIST*'
+          msg                     = 'Incorrect ALV program name selected'
+          level                   = cl_aunit_assert=>tolerable
+          quit                    = cl_aunit_assert=>no
+          ).
+    call method flights_reportable->set_alv_function_module_name
+      exporting
+        alv_style_grid            = grid_flag
+      changing
+        alv_display_function_module
+                                  = alv_display_function_module
+        .
+    cl_abap_unit_assert=>assert_char_cp(
+          act                     = alv_display_function_module
+          exp                     = '*GRID*'
+          msg                     = 'Incorrect ALV program name selected'
+          level                   = cl_aunit_assert=>tolerable
+          quit                    = cl_aunit_assert=>no
+          ).
+  endmethod.
+  method apply_flight_discount_over_100.
+    constants    : discount_exceeding_100_percent
+                                  type num03     value 101
+                 .
+    data         : flights_entry  like line
+                                    of service_locator=>singleton->flights_organizer->flights_stack
+                 .
+    " The user may indicate on the initial selection screen to calculate
+    " a percentage discount for the airfares to be shown in the report.
+    " The selection screen parameter is 3 digits to accept using a 100
+    " percent discount (free flight!).  We do not want the discount to
+    " be any higher than 100 percent or the airfares will be shown using
+    " negative numbers (the airline would pay you to fly!).  Here we
+    " insure that the calculated airfare cannot be negative.
+    " Set table flights_stack with some records from the sflights table:
+    cl_abap_unit_assert=>assert_not_initial(
+      act                         = service_locator=>singleton->flights_organizer->flights_stack
+      msg                         = 'No records available for testing flight discount'
+      ).
+    perform apply_flight_discount using discount_exceeding_100_percent
+                               changing service_locator=>singleton->flights_organizer->flights_stack.
+    loop at service_locator=>singleton->flights_organizer->flights_stack
+       into flights_entry.
+      " We have not specified a quit parameter for the next assertion.
+      " The default action is to terminate the test method upon encountering
+      " an error.  We do not need to test every record in the table for
+      " a negative value since if any one of them is negative then we
+      " should expect all of them to be negative.  So we can exit this
+      " loop and this test method with the first negative price.  We are
+      " using a loop here just in case the first record we encounter had
+      " a full price of zero, which would calculate to a discounted price
+      " also of zero regardless of an invalid discount value, and would pass
+      " the test if we were to inspect only at the first record in the table.
+      cl_abap_unit_assert=>assert_equals(
+        act                       = flights_entry-price
+        exp                       = abs( flights_entry-price )
+        msg                       = 'Discounted airfare is negative value'
+        ).
+    endloop.
+  endmethod.
+  method apply_flight_discount_50.
+    constants    : discount_50_percent
+                                  type num03     value 50
+                 , discount_calculator
+                                  type funcname  value 'ZCALC_DISCOUNT_AIRFARE_TSTDBL'
+                 .
+    data         : flights_entry  like line
+                                    of service_locator=>singleton->flights_organizer->flights_stack
+                 , flights_stack_before
+                                  type flights_organizable=>flights_list
+                 , test_double_discount_fare
+                                  type s_price
+                 .
+    cl_abap_unit_assert=>assert_not_initial(
+      act                         = service_locator=>singleton->flights_organizer->flights_stack
+      msg                         = 'No records available for testing flight discount'
+      ).
+    service_locator=>singleton->register_discount_calculator(
+      exporting
+        discount_calculator       = discount_calculator
+        ).
+    call function service_locator=>singleton->discount_calculator
+      exporting
+        full_fare                 = 00
+        discount                  = 00
+      importing
+        discount_fare             = test_double_discount_fare
+      exceptions
+        others                    = 0
+        .
+    loop at service_locator=>singleton->flights_organizer->flights_stack
+       into flights_entry.
+      flights_entry-price         = test_double_discount_fare.
+      append flights_entry
+          to flights_stack_before.
+    endloop.
+    perform apply_flight_discount using discount_50_percent
+                               changing service_locator=>singleton->flights_organizer->flights_stack.
+    cl_abap_unit_assert=>assert_equals(
+      act                         = service_locator=>singleton->flights_organizer->flights_stack
+      exp                         = flights_stack_before
+      msg                         = 'Unequal discounted flights stacks'
+      ).
+  endmethod.
+  method adjust_flight_revenue.
+    data         : flights_entry  like line
+                                    of service_locator=>singleton->flights_organizer->flights_stack
+                 , flight_revenue type flights_organizable=>flights_row-paymentsum
+                 .
+    " The value of the flight revenue is calculated as the product of the
+    " airfare and number of booked seats.  Here we insure that the revenue
+    " calculated by the called subroutine represents this product.
+    " Set table flights_stack with some records from the sflights table:
+    cl_abap_unit_assert=>assert_not_initial(
+      act                         = service_locator=>singleton->flights_organizer->flights_stack
+      msg                         = 'No records available for testing flight discount'
+      ).
+    service_locator=>singleton->register_revenue_calculator(
+      exporting
+        revenue_calculator        = zcl_revenue_calc_test_double=>singleton
+        ).
+    perform adjust_flight_revenue changing service_locator=>singleton->flights_organizer->flights_stack.
+    loop at service_locator=>singleton->flights_organizer->flights_stack
+       into flights_entry.
+      flight_revenue              = zcl_revenue_calc_test_double=>flight_revenue_for_test.
+      cl_abap_unit_assert=>assert_equals(
+        act                       = flights_entry-paymentsum
+        exp                       = flight_revenue
+        msg                       = 'Flight revenue value other than expected'
+        ).
+    endloop.
+  endmethod.
+  method present_report.
+    constants    : no_discount    type discount  value 00
+                 , alv_classic_list
+                                  type abap_bool value abap_false
+                 .
+    data         : flights_reportable
+                                  type ref
+                                    to flights_report_test_double
+                 .
+    set_bogus_message( ).
+    assert_message_is_bogus( ).
+    perform present_report using no_discount
+                                 alv_classic_list
+                                 carrier.
+    assert_message_not_bogus( ).
+    try.
+      flights_reportable          ?= service_locator=>singleton->flights_report.
+    catch cx_sy_move_cast_error.
+      cl_abap_unit_assert=>fail(
+        msg                       = 'Caught exception in test method present_report'
+        ).
+    endtry.
+    cl_abap_unit_assert=>assert_equals(
+      act                         = flights_reportable->number_of_calls
+      exp                         = 01
+      msg                         = 'Unexpected number of calls to method'
+      ).
+  endmethod.
+  method show_flights_count.
+    data         : flights_count  type flights_organizable=>counter
+                 .
+    set_bogus_message( ).
+    assert_message_is_bogus( ).
+    try.
+      flights_count               = service_locator=>singleton->flights_organizer->get_flights_count( ).
+      perform show_flights_count using flights_count
+                                       carrier.
+    catch cx_aunit_uncaught_message.
+      cl_abap_unit_assert=>fail(
+        msg                       = 'Caught exception in test method show_flights_count'
+        ).
+    endtry.
+    assert_message_not_bogus( ).
+  endmethod.
+  method set_bogus_message.
+    sy-msgty                      = bogus_message_type.
+    sy-msgid                      = bogus_message_id.
+    sy-msgno                      = bogus_message_number.
+    sy-msgv1                      = bogus_message_variable.
+    sy-msgv2                      = bogus_message_variable.
+    sy-msgv3                      = bogus_message_variable.
+    sy-msgv4                      = bogus_message_variable.
+  endmethod.
+  method assert_message_is_bogus.
+    cl_abap_unit_assert=>assert_equals(
+      act                         = sy-msgty
+      exp                         = bogus_message_type
+      msg                         = 'System field sy-msgty has unexpected value'
+      ).
+    cl_abap_unit_assert=>assert_equals(
+      act                         = sy-msgid
+      exp                         = bogus_message_id
+      msg                         = 'System field sy-msgid has unexpected value'
+      ).
+    cl_abap_unit_assert=>assert_equals(
+      act                         = sy-msgno
+      exp                         = bogus_message_number
+      msg                         = 'System field sy-msgno has unexpected value'
+      ).
+    cl_abap_unit_assert=>assert_equals(
+      act                         = sy-msgv1
+      exp                         = bogus_message_variable
+      msg                         = 'System field sy-msgv1 has unexpected value'
+      ).
+    cl_abap_unit_assert=>assert_equals(
+      act                         = sy-msgv2
+      exp                         = bogus_message_variable
+      msg                         = 'System field sy-msgv2 has unexpected value'
+      ).
+    cl_abap_unit_assert=>assert_equals(
+      act                         = sy-msgv3
+      exp                         = bogus_message_variable
+      msg                         = 'System field sy-msgv3 has unexpected value'
+      ).
+    cl_abap_unit_assert=>assert_equals(
+      act                         = sy-msgv4
+      exp                         = bogus_message_variable
+      msg                         = 'System field sy-msgv4 has unexpected value'
+      ).
+  endmethod.
+  method assert_message_not_bogus.
+    cl_abap_unit_assert=>assert_differs(
+      act                         = sy-msgty
+      exp                         = bogus_message_type
+      msg                         = 'System field sy-msgty has unexpected value'
+      ).
+    cl_abap_unit_assert=>assert_differs(
+      act                         = sy-msgid
+      exp                         = bogus_message_id
+      msg                         = 'System field sy-msgid has unexpected value'
+      ).
+    cl_abap_unit_assert=>assert_differs(
+      act                         = sy-msgno
+      exp                         = bogus_message_number
+      msg                         = 'System field sy-msgno has unexpected value'
+      ).
+    cl_abap_unit_assert=>assert_differs(
+      act                         = sy-msgv1
+      exp                         = bogus_message_variable
+      msg                         = 'System field sy-msgv1 has unexpected value'
+      ).
+    cl_abap_unit_assert=>assert_differs(
+      act                         = sy-msgv2
+      exp                         = bogus_message_variable
+      msg                         = 'System field sy-msgv2 has unexpected value'
+      ).
+    cl_abap_unit_assert=>assert_differs(
+      act                         = sy-msgv3
+      exp                         = bogus_message_variable
+      msg                         = 'System field sy-msgv3 has unexpected value'
+      ).
+    cl_abap_unit_assert=>assert_differs(
+      act                         = sy-msgv4
+      exp                         = bogus_message_variable
+      msg                         = 'System field sy-msgv4 has unexpected value'
+      ).
+  endmethod.
+  method show_flights.
+    data         : carrier_id_stack
+                                  type table
+                                    of s_carr_id
+                 , carrier_id_entry
+                                  like line
+                                    of carrier_id_stack
+                 , flights_reportable
+                                  type ref
+                                    to flights_report_test_double
+                 .
+    append: lufthansa             to carrier_id_stack
+          , united_airlines       to carrier_id_stack
+          , american_airlines     to carrier_id_stack
+          .
+    loop at carrier_id_stack
+       into carrier_id_entry.
+      carrier                     = carrier_id_entry.
+      call method service_locator=>singleton->flights_organizer->get_flights_via_carrier
+        exporting
+          carrier                 = carrier
+          .
+      call method service_locator=>singleton->flights_report->show_flights
+        exporting
+          alv_style_grid          = abap_false
+        changing
+          flights_stack           = service_locator=>singleton->flights_organizer->flights_stack
+          .
+    endloop.
+    try.
+      flights_reportable          ?= service_locator=>singleton->flights_report.
+    catch cx_sy_move_cast_error.
+      cl_abap_unit_assert=>fail(
+        msg                       = 'Caught exception in test method show_flights'
+        ).
+    endtry.
+    cl_abap_unit_assert=>assert_equals(
+      act                         = flights_reportable->number_of_calls
+      exp                         = lines( carrier_id_stack )
+      msg                         = 'Unexpected number of calls to method'
+      ).
+  endmethod.
+endclass.
+class service_factory_autester         definition
+                                       final
+                                       for testing
+                                       risk level harmless
+                                       duration short
+                                       .
+  private section.
+    methods      : setup
+                 , create_all_services
+                     for testing
+                 , create_flights_organizer
+                     for testing
+                 , create_flights_report
+                     for testing
+                 , create_revenue_calculator
+                     for testing
+                 , create_discount_calculator
+                     for testing
+                 , create_message_dispatcher
+                     for testing
+                 .
+endclass.
+class service_factory_autester         implementation.
+  method setup.
+    data         : service_locator_test_helper
+                                  type ref
+                                    to service_locator_test_helper
+                 .
+    create object service_locator_test_helper.
+    service_locator_test_helper->clear_all_service_locators( ).
+  endmethod.
+  method create_all_services.
+    service_factory=>singleton->create_all_services( ).
+    cl_abap_unit_assert=>assert_bound(
+      act                         = service_locator=>singleton->flights_organizer
+      ).
+    cl_abap_unit_assert=>assert_bound(
+      act                         = service_locator=>singleton->flights_report
+      ).
+    cl_abap_unit_assert=>assert_bound(
+      act                         = service_locator=>singleton->revenue_calculator
+      ).
+    cl_abap_unit_assert=>assert_not_initial(
+      act                         = service_locator=>singleton->discount_calculator
+      ).
+    cl_abap_unit_assert=>assert_bound(
+      act                         = service_locator=>singleton->message_dispatcher
+      ).
+  endmethod.
+  method create_flights_organizer.
+    service_factory=>singleton->create_flights_organizer( ).
+    cl_abap_unit_assert=>assert_bound(
+      act                         = service_locator=>singleton->flights_organizer
+      ).
+    cl_abap_unit_assert=>assert_not_bound(
+      act                         = service_locator=>singleton->flights_report
+      ).
+    cl_abap_unit_assert=>assert_not_bound(
+      act                         = service_locator=>singleton->revenue_calculator
+      ).
+    cl_abap_unit_assert=>assert_initial(
+      act                         = service_locator=>singleton->discount_calculator
+      ).
+    cl_abap_unit_assert=>assert_not_bound(
+      act                         = service_locator=>singleton->message_dispatcher
+      ).
+  endmethod.
+  method create_flights_report.
+    service_factory=>singleton->create_flights_report( ).
+    cl_abap_unit_assert=>assert_not_bound(
+      act                         = service_locator=>singleton->flights_organizer
+      ).
+    cl_abap_unit_assert=>assert_bound(
+      act                         = service_locator=>singleton->flights_report
+      ).
+    cl_abap_unit_assert=>assert_not_bound(
+      act                         = service_locator=>singleton->revenue_calculator
+      ).
+    cl_abap_unit_assert=>assert_initial(
+      act                         = service_locator=>singleton->discount_calculator
+      ).
+    cl_abap_unit_assert=>assert_not_bound(
+      act                         = service_locator=>singleton->message_dispatcher
+      ).
+  endmethod.
+  method create_revenue_calculator.
+    service_factory=>singleton->create_revenue_calculator( ).
+    cl_abap_unit_assert=>assert_not_bound(
+      act                         = service_locator=>singleton->flights_organizer
+      ).
+    cl_abap_unit_assert=>assert_not_bound(
+      act                         = service_locator=>singleton->flights_report
+      ).
+    cl_abap_unit_assert=>assert_bound(
+      act                         = service_locator=>singleton->revenue_calculator
+      ).
+    cl_abap_unit_assert=>assert_initial(
+      act                         = service_locator=>singleton->discount_calculator
+      ).
+    cl_abap_unit_assert=>assert_not_bound(
+      act                         = service_locator=>singleton->message_dispatcher
+      ).
+  endmethod.
+  method create_discount_calculator.
+    service_factory=>singleton->create_discount_calculator( ).
+    cl_abap_unit_assert=>assert_not_bound(
+      act                         = service_locator=>singleton->flights_organizer
+      ).
+    cl_abap_unit_assert=>assert_not_bound(
+      act                         = service_locator=>singleton->flights_report
+      ).
+    cl_abap_unit_assert=>assert_not_bound(
+      act                         = service_locator=>singleton->revenue_calculator
+      ).
+    cl_abap_unit_assert=>assert_not_initial(
+      act                         = service_locator=>singleton->discount_calculator
+      ).
+    cl_abap_unit_assert=>assert_not_bound(
+      act                         = service_locator=>singleton->message_dispatcher
+      ).
+  endmethod.
+  method create_message_dispatcher.
+    service_factory=>singleton->create_message_dispatcher( ).
+    cl_abap_unit_assert=>assert_not_bound(
+      act                         = service_locator=>singleton->flights_organizer
+      ).
+    cl_abap_unit_assert=>assert_not_bound(
+      act                         = service_locator=>singleton->flights_report
+      ).
+    cl_abap_unit_assert=>assert_not_bound(
+      act                         = service_locator=>singleton->revenue_calculator
+      ).
+    cl_abap_unit_assert=>assert_initial(
+      act                         = service_locator=>singleton->discount_calculator
+      ).
+    cl_abap_unit_assert=>assert_bound(
+      act                         = service_locator=>singleton->message_dispatcher
+      ).
+  endmethod.
+endclass.

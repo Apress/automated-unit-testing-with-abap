@@ -1,0 +1,1078 @@
+report.
+interface reportable.
+    methods      : produce_report
+                 .
+endinterface.
+interface diagnostic_reportable.
+    types        : severity       type icon_d
+                 , component      type program
+                 , diagnostic     type c length 150
+                 , begin of report_row
+                 ,   severity     type diagnostic_reportable=>severity
+                 ,   component    type diagnostic_reportable=>component
+                 ,   diagnostic   type diagnostic_reportable=>diagnostic
+                 , end   of report_row
+                 , report_list    type standard table
+                                    of diagnostic_reportable=>report_row
+                 .
+    constants    : error          type diagnostic_reportable=>severity
+                                                 value icon_red_light
+                 , warning        type diagnostic_reportable=>severity
+                                                 value icon_yellow_light
+                 , status         type diagnostic_reportable=>severity
+                                                 value icon_green_light
+                 .
+    methods      : add_diagnostic
+                     importing
+                       severity
+                         type diagnostic_reportable=>severity
+                       component
+                         type diagnostic_reportable=>component
+                       diagnostic
+                         type diagnostic_reportable=>diagnostic
+                 .
+endinterface.
+interface source_code_retrievable.
+    types        : directory      type rlgrap-filename
+                 , file_name      type rlgrap-filename
+                 , retrieval_return_code
+                                  type sysubrc
+                 , begin of source_code_row
+                 ,   row          type abaptxt255
+                 , end   of source_code_row
+                 , source_code_list
+                                  type standard table
+                                    of source_code_retrievable=>source_code_row
+                 .
+    methods      : retrieve_source_code
+                     importing
+                       file_name
+                         type source_code_retrievable=>file_name
+                     exporting
+                       source_code_stack
+                         type source_code_retrievable=>source_code_list
+                       retrieval_return_code
+                         type source_code_retrievable=>retrieval_return_code
+                 .
+endinterface.
+interface source_code_uploadable.
+    types        : member_name    type progname
+                 , program_name_prefix
+                                  type c length 04
+                 .
+    methods      : upload_all_source_code
+                     importing
+                       directory
+                         type source_code_retrievable=>directory
+                       program_name_prefix
+                         type source_code_uploadable=>program_name_prefix
+                       run_in_update_mode
+                         type abap_bool
+                 .
+endinterface.
+interface member_activity_diagnosable.
+    methods      : diagnose_member_activity
+                     importing
+                       member_name
+                         type source_code_uploadable=>member_name
+                       activity_return_code
+                         type source_code_retrievable=>retrieval_return_code
+                       activity_message
+                         type diagnostic_reportable=>diagnostic
+                 .
+endinterface.
+interface selection_processable.
+    constants    : execute        type sy-ucomm  value 'ONLI'
+                 .
+    methods      : get_pc_directory
+                     changing
+                       directory
+                         type source_code_retrievable=>directory
+                 .
+endinterface.
+interface program_creatable.
+    types        : package        type devclass
+                 , return_code    type sysubrc
+                 .
+    constants    : default_temporary_package
+                                  type program_creatable=>package
+                                                 value '$TMP'
+                 .
+    methods      : assign_package
+                     importing
+                       program_name
+                         type source_code_uploadable=>member_name
+                       package
+                         type program_creatable=>package
+                     exporting
+                       return_code
+                         type program_creatable=>return_code
+                 , create_program
+                     importing
+                       program_name
+                         type source_code_uploadable=>member_name
+                       source_code_stack
+                         type source_code_retrievable=>source_code_list
+                     exporting
+                       return_code
+                         type program_creatable=>return_code
+                 , create_textpool
+                     importing
+                       program_name
+                         type source_code_uploadable=>member_name
+                     exporting
+                       return_code
+                         type program_creatable=>return_code
+                 .
+endinterface.
+class report                           definition
+                                       abstract
+                                       .
+  public section.
+    interfaces   : reportable all methods abstract
+                 .
+    aliases      : produce_report
+                     for reportable~produce_report
+                 .
+  protected section.
+    data         : report_created type abap_bool
+                 .
+    methods      : create_report
+                     changing
+                       table
+                         type standard table
+                 , display_report
+                 , get_report_header abstract
+                     returning
+                       value(report_header)
+                         type lvc_title
+                 , override_column_attributes
+                     importing
+                       column_reference ##NEEDED
+                         type salv_s_column_ref
+                 , set_column_attributes
+                 , set_grid_manipulation
+                 , set_report_header
+                 .
+  private section.
+    data         : alv_report     type ref
+                                    to cl_salv_table
+                 .
+endclass.
+class report                           implementation.
+  method create_report.
+    try.
+      call method cl_salv_table=>factory
+        importing
+          r_salv_table            = me->alv_report
+        changing
+          t_table                 = table
+          .
+      me->report_created          = abap_true.
+    catch cx_salv_msg ##NO_HANDLER.
+    endtry.
+  endmethod.
+  method display_report.
+    me->set_report_header( ).
+    me->set_column_attributes( ).
+    me->set_grid_manipulation( ).
+    me->alv_report->display( ).
+  endmethod.
+  method override_column_attributes ##NEEDED.
+    " Null method optionally to be overridden in subclasses
+  endmethod.
+  method set_column_attributes.
+    constants    : underscore_to_space
+                                  type char2     value '_ '
+                 .
+    data         : report_columns type ref
+                                    to cl_salv_columns_table
+                 , report_column_stack
+                                  type salv_t_column_ref
+                 , report_column_entry
+                                  like line
+                                    of report_column_stack
+                 , report_column_title_long
+                                  type scrtext_l
+                 , report_column_title_medium
+                                  type scrtext_m
+                 , report_column_title_short
+                                  type scrtext_s
+                 .
+    report_columns                = me->alv_report->get_columns( ).
+    report_column_stack           = report_columns->get( ).
+    " Each column title is set to the name of the column with all
+    " characters beyond the first character set to lower case and
+    " all underscore characters replaced with space:
+    loop at report_column_stack
+       into report_column_entry.
+      report_column_title_long    = report_column_entry-columnname.
+      translate report_column_title_long+01 to lower case.
+      translate report_column_title_long using underscore_to_space.
+      report_column_title_medium  = report_column_title_long.
+      report_column_title_short   = report_column_title_long.
+      if report_column_title_short is not initial.
+        report_column_entry-r_column->set_long_text( report_column_title_long ).
+        report_column_entry-r_column->set_medium_text( report_column_title_medium ).
+        report_column_entry-r_column->set_short_text( report_column_title_short ).
+      endif.
+      call method me->override_column_attributes
+        exporting
+          column_reference        = report_column_entry.
+    endloop.
+  endmethod.
+  method set_grid_manipulation.
+    data         : grid_functions type ref
+                                    to cl_salv_functions_list
+                 .
+    " Enable grid functions:
+    grid_functions                = me->alv_report->get_functions( ).
+    grid_functions->set_default( ).
+    grid_functions->set_detail( ).
+    grid_functions->set_group_aggregation( ).
+    grid_functions->set_group_export( ).
+    grid_functions->set_group_view( ).
+    grid_functions->set_print_preview( ).
+  endmethod.
+  method set_report_header.
+    data         : report_display_settings
+                                  type ref
+                                    to cl_salv_display_settings
+                 , report_header  type lvc_title
+                 .
+    report_header                 = me->get_report_header( ).
+    report_display_settings       = me->alv_report->get_display_settings( ).
+    report_display_settings->set_list_header( report_header ).
+  endmethod.
+endclass.
+class diagnostic_report                definition
+                                       final
+                                       inheriting from report
+                                       create private
+                                       .
+  public section.
+    interfaces   : diagnostic_reportable
+                 .
+    aliases      : add_diagnostic
+                     for diagnostic_reportable~add_diagnostic
+                 .
+    class-data   : singleton      type ref
+                                    to diagnostic_report
+                                    read-only
+                 .
+    class-methods: class_constructor
+                 .
+    methods      : produce_report redefinition
+                 .
+  protected section.
+    methods      : get_report_header redefinition
+                 , override_column_attributes redefinition
+                 .
+  private section.
+    constants    : report_header  type lvc_title value 'ZAUT exercise programs upload report'
+                 .
+    data         : report_stack   type diagnostic_reportable=>report_list
+                 .
+endclass.
+class diagnostic_report                implementation.
+  method class_constructor.
+    create object diagnostic_report=>singleton.
+  endmethod.
+  method add_diagnostic.
+    data         : report_entry   like line
+                                    of report_stack
+                 .
+    report_entry-severity         = severity.
+    report_entry-component        = component.
+    report_entry-diagnostic       = diagnostic.
+    append report_entry
+        to report_stack.
+  endmethod.
+  method get_report_header.
+    report_header                 = me->report_header.
+  endmethod.
+  method override_column_attributes.
+    constants    : severity_column
+                                  type string    value `SEVERITY`
+                 , severity_column_length
+                                  type lvc_outlen
+                                                 value 12
+                 , diagnostic_column
+                                  type string    value `DIAGNOSTIC`
+                 , diagnostic_column_length
+                                  type lvc_outlen
+                                                 value 50
+                 .
+    case column_reference-columnname.
+      when severity_column.
+        column_reference-r_column->set_output_length( severity_column_length ).
+      when diagnostic_column.
+        column_reference-r_column->set_output_length( diagnostic_column_length ).
+    endcase.
+  endmethod.
+  method produce_report.
+    call method me->create_report
+      changing
+        table                     = me->report_stack
+        .
+    if me->report_created eq abap_true.
+      call method me->display_report.
+    endif.
+  endmethod.
+endclass.
+class source_code_retriever            definition
+                                       final
+                                       create private
+                                       .
+  public section.
+    interfaces   : source_code_retrievable
+                 .
+    aliases      : retrieve_source_code
+                     for source_code_retrievable~retrieve_source_code
+                 .
+    class-data   : singleton      type ref
+                                    to source_code_retriever
+                 .
+    class-methods: class_constructor
+                 .
+endclass.
+class source_code_retriever            implementation.
+  method class_constructor.
+    create object source_code_retriever=>singleton.
+  endmethod.
+  method retrieve_source_code.
+    constants    : file_open_error
+                                  type sysubrc   value 01
+                 , file_read_error
+                                  type sysubrc   value 02
+                 , no_batch       type sysubrc   value 03
+                 , gui_refuse_filetransfer
+                                  type sysubrc   value 04
+                 , invalid_type   type sysubrc   value 05
+                 , no_authority   type sysubrc   value 06
+                 , unknown_error  type sysubrc   value 07
+                 , bad_data_format
+                                  type sysubrc   value 08
+                 , header_not_allowed
+                                  type sysubrc   value 09
+                 , separator_not_allowed
+                                  type sysubrc   value 10
+                 , header_too_long
+                                  type sysubrc   value 11
+                 , unknown_dp_error
+                                  type sysubrc   value 12
+                 , access_denied  type sysubrc   value 13
+                 , dp_out_of_memory
+                                  type sysubrc   value 14
+                 , disk_full      type sysubrc   value 15
+                 , dp_timeout     type sysubrc   value 16
+                 , not_supported_by_gui
+                                  type sysubrc   value 17
+                 , error_no_gui   type sysubrc   value 18
+                 .
+    data         : source_file_name
+                                  type string
+                 .
+    clear: source_code_stack
+         , retrieval_return_code
+         .
+    source_file_name              = file_name.
+    cl_gui_frontend_services=>gui_upload(
+      exporting
+        filename                  = source_file_name
+      changing
+        data_tab                  = source_code_stack
+      exceptions
+        file_open_error           = file_open_error
+        file_read_error           = file_read_error
+        no_batch                  = no_batch
+        gui_refuse_filetransfer   = gui_refuse_filetransfer
+        invalid_type              = invalid_type
+        no_authority              = no_authority
+        unknown_error             = unknown_error
+        bad_data_format           = bad_data_format
+        header_not_allowed        = header_not_allowed
+        separator_not_allowed     = separator_not_allowed
+        header_too_long           = header_too_long
+        unknown_dp_error          = unknown_dp_error
+        access_denied             = access_denied
+        dp_out_of_memory          = dp_out_of_memory
+        disk_full                 = disk_full
+        dp_timeout                = dp_timeout
+        not_supported_by_gui      = not_supported_by_gui
+        error_no_gui              = error_no_gui
+        ).
+    retrieval_return_code         = sy-subrc.
+  endmethod.
+endclass.
+class member_activity_diagnoser        definition
+                                       final
+                                       create private
+                                       .
+  public section.
+    interfaces   : member_activity_diagnosable
+                 .
+    aliases      : diagnose_member_activity
+                     for member_activity_diagnosable~diagnose_member_activity
+                 .
+    class-data   : singleton      type ref
+                                    to member_activity_diagnoser
+                 .
+    class-methods: class_constructor
+                 .
+  private section.
+endclass.
+class member_activity_diagnoser        implementation.
+  method class_constructor.
+    create object member_activity_diagnoser=>singleton.
+  endmethod.
+  method diagnose_member_activity.
+    constants    : successful     type string    value 'sucessful'
+                 , failed         type string    value 'failed'
+                 , failure_return_code
+                                  type string    value '- Failure return code'
+                 .
+    data         : severity       type diagnostic_reportable=>severity
+                 , diagnostic     type diagnostic_reportable=>diagnostic
+                 .
+    if activity_return_code       eq 00.
+      severity                    = diagnostic_reportable=>status.
+      concatenate member_name
+                  activity_message
+                  successful
+             into diagnostic
+                    separated by space.
+    else.
+      severity                    = diagnostic_reportable=>error.
+      diagnostic                  = activity_return_code.
+      shift diagnostic left deleting leading space.
+      concatenate member_name
+                  activity_message
+                  failed
+                  failure_return_code
+                  diagnostic
+             into diagnostic
+                    separated by space.
+    endif.
+    diagnostic_report=>singleton->add_diagnostic(
+      exporting
+        severity                  = severity
+        component                 = member_name
+        diagnostic                = diagnostic
+      ).
+  endmethod.
+endclass.
+class program_creator                  definition
+                                       abstract
+                                       .
+  public section.
+    interfaces   : program_creatable all methods abstract
+                 .
+    aliases      : assign_package
+                     for program_creatable~assign_package
+                 , create_program
+                     for program_creatable~create_program
+                 , create_textpool
+                     for program_creatable~create_textpool
+                 .
+    constants    : program_creation_activity
+                                  type diagnostic_reportable=>diagnostic
+                                                 value 'program creation'
+                 , textpool_creation_activity
+                                  type diagnostic_reportable=>diagnostic
+                                                 value 'textpool creation'
+                 , package_assignment_activity
+                                  type diagnostic_reportable=>diagnostic
+                                                 value 'package assignment'
+                 , no_program_creation_activity
+                                  type diagnostic_reportable=>diagnostic
+                                                 value 'program creation bypass'
+                 , no_textpool_creation_activity
+                                  type diagnostic_reportable=>diagnostic
+                                                 value 'textpool creation bypass'
+                 , no_package_assignment_activity
+                                  type diagnostic_reportable=>diagnostic
+                                                 value 'package assignment bypass'
+                 .
+endclass.
+class active_program_creator           definition
+                                       final
+                                       inheriting from program_creator
+                                       .
+  public section.
+    constants    : class_identifier
+                                  type seoclsname
+                                                 value 'ACTIVE_PROGRAM_CREATOR'
+                 .
+    data         : common_textpool_stack
+                                  type standard table
+                                    of textpool
+                 .
+    methods      : assign_package
+                     redefinition
+                 , create_program
+                     redefinition
+                 , create_textpool
+                     redefinition
+                 , constructor
+                 .
+endclass.
+class active_program_creator           implementation.
+  method constructor.
+    constants    : selection_text type textpoolid
+                                                 value 'S'
+                 , carrier_key    type textpoolky
+                                                 value 'CARRIER'
+                 , discount_key   type textpoolky
+                                                 value 'DISCOUNT'
+                 , via_grid_key   type textpoolky
+                                                 value 'VIA_GRID'
+                 , via_list_key   type textpoolky
+                                                 value 'VIA_LIST'
+                 , carrier_text   type textpooltx
+                                                 value 'Airline'
+                 , discount_text  type textpooltx
+                                                 value 'Airfare discount percentage'
+                 , via_grid_text  type textpooltx
+                                                 value 'Display using alv grid'
+                 , via_list_text  type textpooltx
+                                                 value 'Display using alv classic list'
+                 .
+    data         : common_textpool_entry
+                                  like line
+                                    of me->common_textpool_stack
+                 .
+    super->constructor( ).
+    common_textpool_entry-id      = selection_text.
+    common_textpool_entry-key     = carrier_key.
+    common_textpool_entry-entry   = carrier_text.
+    shift common_textpool_entry-entry right by 8 places.
+    append     common_textpool_entry
+        to me->common_textpool_stack.
+    common_textpool_entry-key     = discount_key.
+    common_textpool_entry-entry   = discount_text.
+    shift common_textpool_entry-entry right by 8 places.
+    append     common_textpool_entry
+        to me->common_textpool_stack.
+    common_textpool_entry-key     = via_grid_key.
+    common_textpool_entry-entry   = via_grid_text.
+    shift common_textpool_entry-entry right by 8 places.
+    append     common_textpool_entry
+        to me->common_textpool_stack.
+    common_textpool_entry-key     = via_list_key.
+    common_textpool_entry-entry   = via_list_text.
+    shift common_textpool_entry-entry right by 8 places.
+    append     common_textpool_entry
+        to me->common_textpool_stack.
+  endmethod.
+  method assign_package.
+    constants    : already_assigned_to_package
+                                  type diagnostic_reportable=>diagnostic
+                                                 value 'already assigned to package'
+                 , transportable_component
+                                  type tadir-pgmid
+                                                 value 'R3TR'
+                 , program_object type tadir-object
+                                                 value 'PROG'
+                 , object_exists_global
+                                  type sysubrc   value 88
+                 , object_exists_local
+                                  type sysubrc   value 89
+                 , unexpected_failure
+                                  type sysubrc   value 90
+                 .
+    data         : current_package
+                                  type devclass
+                 , diagnostic     type diagnostic_reportable=>diagnostic
+                 .
+    clear return_code.
+    select single devclass
+      into current_package
+      from tadir
+     where pgmid                  eq transportable_component
+       and object                 eq program_object
+       and obj_name               eq program_name
+         .
+    if current_package is not initial.
+      concatenate program_name
+                  already_assigned_to_package
+                  current_package
+             into diagnostic
+                    separated by space.
+      diagnostic_report=>singleton->add_diagnostic(
+        exporting
+          severity                = diagnostic_reportable=>warning
+          component               = program_name
+          diagnostic              = diagnostic
+        ).
+      return.
+    endif.
+    call function 'TRINT_TADIR_INSERT'
+      exporting
+        pgmid                     = transportable_component
+        object                    = program_object
+        obj_name                  = program_name
+        masterlang                = sy-langu
+        devclass                  = package
+      exceptions
+        object_exists_global      = object_exists_global
+        object_exists_local       = object_exists_local
+        others                    = unexpected_failure
+        .
+    return_code                   = sy-subrc.
+    member_activity_diagnoser=>singleton->diagnose_member_activity(
+      exporting
+        member_name               = program_name
+        activity_return_code      = return_code
+        activity_message          = me->package_assignment_activity
+      ).
+  endmethod.
+  method create_program.
+    clear return_code.
+    insert report program_name from source_code_stack.
+    return_code                   = sy-subrc.
+    member_activity_diagnoser=>singleton->diagnose_member_activity(
+      exporting
+        member_name               = program_name
+        activity_return_code      = return_code
+        activity_message          = me->program_creation_activity
+      ).
+  endmethod.
+  method create_textpool.
+    constants    : report_text    type textpoolid
+                                                 value 'R'
+                 .
+    data         : textpool_stack type standard table
+                                    of textpool
+                 , textpool_entry like line
+                                    of textpool_stack
+                 .
+    clear return_code.
+    textpool_entry-id             = report_text.
+    textpool_entry-entry          = program_name.
+    append  textpool_entry
+        to  textpool_stack.
+    append lines of me->common_textpool_stack
+        to                     textpool_stack.
+    insert textpool program_name
+      from textpool_stack language sy-langu.
+    return_code                   = sy-subrc.
+    member_activity_diagnoser=>singleton->diagnose_member_activity(
+      exporting
+        member_name               = program_name
+        activity_return_code      = return_code
+        activity_message          = me->textpool_creation_activity
+      ).
+  endmethod.
+endclass.
+class passive_program_creator          definition
+                                       final
+                                       inheriting from program_creator
+                                       .
+  public section.
+    constants    : class_identifier
+                                  type seoclsname
+                                                 value 'PASSIVE_PROGRAM_CREATOR'
+                 .
+    methods      : assign_package
+                     redefinition
+                 , create_program
+                     redefinition
+                 , create_textpool
+                     redefinition
+                 .
+endclass.
+class passive_program_creator          implementation.
+  method assign_package.
+    return_code                   = 00.
+    member_activity_diagnoser=>singleton->diagnose_member_activity(
+      exporting
+        member_name               = program_name
+        activity_return_code      = return_code
+        activity_message          = me->no_package_assignment_activity
+      ).
+  endmethod.
+  method create_program.
+    return_code                   = 00.
+    member_activity_diagnoser=>singleton->diagnose_member_activity(
+      exporting
+        member_name               = program_name
+        activity_return_code      = return_code
+        activity_message          = me->no_program_creation_activity
+      ).
+  endmethod.
+  method create_textpool.
+    return_code                   = 00.
+    member_activity_diagnoser=>singleton->diagnose_member_activity(
+      exporting
+        member_name               = program_name
+        activity_return_code      = return_code
+        activity_message          = me->no_textpool_creation_activity
+      ).
+  endmethod.
+endclass.
+class source_code_uploader             definition
+                                       final
+                                       create private
+                                       .
+  public section.
+    interfaces   : source_code_uploadable
+                 .
+    aliases      : upload_all_source_code
+                     for source_code_uploadable~upload_all_source_code
+                 .
+    class-data   : singleton      type ref
+                                    to source_code_uploader
+                 .
+    class-methods: class_constructor
+                 .
+  private section.
+    types        : row_number     type int4
+                 .
+    constants    : member_name_list
+                                  type filename  value 'ZAUTLIST'
+                 , member_name_extension
+                                  type char4     value '.txt'
+                 , member_upload_activity
+                                  type diagnostic_reportable=>diagnostic
+                                                 value 'member upload'
+                 .
+    data         : program_creator
+                                  type ref
+                                    to program_creatable
+                 .
+    methods      : apply_program_name_prefix
+                     importing
+                       program_name
+                         type source_code_uploadable=>member_name
+                       program_name_prefix
+                         type source_code_uploadable=>program_name_prefix
+                     returning
+                       value(prefixed_program_name)
+                         type source_code_uploadable=>member_name
+                 , show_progress
+                     importing
+                       current_row
+                         type source_code_uploader=>row_number
+                       total_rows
+                         type source_code_uploader=>row_number
+                 , upload_single_member
+                     importing
+                       directory
+                         type source_code_retrievable=>directory
+                       program_name
+                         type source_code_uploadable=>member_name
+                       program_name_prefix
+                         type source_code_uploadable=>program_name_prefix
+                 .
+endclass.
+class source_code_uploader             implementation.
+  method class_constructor.
+    create object source_code_uploader=>singleton.
+  endmethod.
+  method apply_program_name_prefix.
+    data         : begin of program_name_change_area
+                 ,   prefix       type source_code_uploadable=>program_name_prefix
+                 ,   suffix       type source_code_uploadable=>member_name
+                 , end   of program_name_change_area
+                 .
+    program_name_change_area      = program_name.
+    program_name_change_area-prefix
+                                  = program_name_prefix.
+    prefixed_program_name         = program_name_change_area.
+  endmethod.
+  method show_progress.
+    constants    : maximum_2_digit_number
+                                  type int4      value 99
+                 .
+    data         : begin of progress_message
+                 ,   message      type c length 10
+                                                 value 'Progress: '
+                 ,   progress     type n length 02
+                 ,   percent      type c length 01
+                                                 value '%'
+                 , end   of progress_message
+                 , progress       type p
+                 .
+    progress                      = current_row / total_rows * 100.
+    if progress                   gt maximum_2_digit_number.
+      progress                    = maximum_2_digit_number.
+    endif.
+    progress_message-progress     = progress.
+    call function 'SAPGUI_PROGRESS_INDICATOR'
+      exporting text              = progress_message.
+  endmethod.
+  method upload_all_source_code.
+    constants    : source_directory_is
+                                  type diagnostic_reportable=>diagnostic
+                                                 value 'Source directory is'
+                 , running_in_update_mode
+                                  type diagnostic_reportable=>diagnostic
+                                                 value 'Running in update mode'
+                 , not_running_in_update_mode
+                                  type diagnostic_reportable=>diagnostic
+                                                 value 'Not running in update mode'
+                 .
+    data         : source_file_name
+                                  type rlgrap-filename
+                 , file_member_name
+                                  type source_code_uploadable=>member_name
+                 , program_name   type source_code_uploadable=>member_name
+                 , source_code_file_name_stack
+                                  type source_code_retrievable=>source_code_list
+                 , retrieval_return_code
+                                  type source_code_retrievable=>retrieval_return_code
+                 , diagnostic     type diagnostic_reportable=>diagnostic
+                 , program_creator_class_name
+                                  type seoclsname
+                 .
+    if run_in_update_mode         eq abap_true.
+      program_creator_class_name  = active_program_creator=>class_identifier.
+      diagnostic                  = running_in_update_mode.
+    else.
+      program_creator_class_name  = passive_program_creator=>class_identifier.
+      diagnostic                  = not_running_in_update_mode.
+    endif.
+    diagnostic_report=>singleton->add_diagnostic(
+      exporting
+        severity                  = diagnostic_reportable=>status
+        component                 = space
+        diagnostic                = diagnostic
+      ).
+    create object me->program_creator
+             type (program_creator_class_name).
+    concatenate source_directory_is
+                directory
+           into diagnostic
+                  separated by space.
+    diagnostic_report=>singleton->add_diagnostic(
+      exporting
+        severity                  = diagnostic_reportable=>status
+        component                 = space
+        diagnostic                = diagnostic
+      ).
+    concatenate me->member_name_list
+                me->member_name_extension
+           into file_member_name.
+    concatenate directory
+                file_member_name
+           into source_file_name.
+    source_code_retriever=>singleton->retrieve_source_code(
+      exporting
+        file_name                 = source_file_name
+      importing
+        source_code_stack         = source_code_file_name_stack
+        retrieval_return_code     = retrieval_return_code
+        ).
+    member_activity_diagnoser=>singleton->diagnose_member_activity(
+      exporting
+        member_name               = file_member_name
+        activity_return_code      = retrieval_return_code
+        activity_message          = me->member_upload_activity
+      ).
+    loop at source_code_file_name_stack
+       into program_name.
+      show_progress(
+        current_row               = sy-tabix
+        total_rows                = lines( source_code_file_name_stack )
+        ).
+      me->upload_single_member(
+        exporting
+          directory               = directory
+          program_name            = program_name
+          program_name_prefix     = program_name_prefix
+        ).
+    endloop.
+    diagnostic_report=>singleton->produce_report( ).
+  endmethod.
+  method upload_single_member.
+    constants    : already_exists type diagnostic_reportable=>diagnostic
+                                                 value 'already exists; No overwrite'
+                 .
+    data         : source_file_name
+                                  type rlgrap-filename
+                 , file_member_name
+                                  type source_code_uploadable=>member_name
+                 , source_code_stack
+                                  type source_code_retrievable=>source_code_list
+                 , retrieval_return_code
+                                  type source_code_retrievable=>retrieval_return_code
+                 , target_program_name
+                                  type source_code_uploadable=>member_name
+                 , diagnostic     type diagnostic_reportable=>diagnostic
+                 , return_code    type program_creatable=>return_code
+                 .
+    concatenate program_name
+                me->member_name_extension
+           into file_member_name.
+    concatenate directory
+                file_member_name
+           into source_file_name.
+    source_code_retriever=>singleton->retrieve_source_code(
+      exporting
+        file_name                 = source_file_name
+      importing
+        source_code_stack         = source_code_stack
+        retrieval_return_code     = retrieval_return_code
+        ).
+    member_activity_diagnoser=>singleton->diagnose_member_activity(
+      exporting
+        member_name               = file_member_name
+        activity_return_code      = retrieval_return_code
+        activity_message          = me->member_upload_activity
+      ).
+    if retrieval_return_code gt 00.
+      return.
+    endif.
+    target_program_name           = me->apply_program_name_prefix(
+                                      exporting
+                                        program_name            = program_name
+                                        program_name_prefix     = program_name_prefix
+                                      ).
+    select count(*)
+            up to 01 rows
+      from trdir
+     where name                   eq target_program_name
+         .
+    if sy-subrc                   eq 00.
+      concatenate target_program_name
+                  already_exists
+             into diagnostic
+                    separated by space.
+      diagnostic_report=>singleton->add_diagnostic(
+        exporting
+          severity                = diagnostic_reportable=>warning
+          component               = target_program_name
+          diagnostic              = diagnostic
+        ).
+      return.
+    endif.
+    me->program_creator->create_program(
+      exporting
+        program_name              = target_program_name
+        source_code_stack         = source_code_stack
+      importing
+        return_code               = return_code
+      ).
+    if return_code                gt 00.
+      return.
+    endif.
+    me->program_creator->create_textpool(
+      exporting
+        program_name              = target_program_name
+      importing
+        return_code               = return_code
+      ).
+    if return_code                gt 00.
+      return.
+    endif.
+    me->program_creator->assign_package(
+      exporting
+        program_name              = target_program_name
+        package                   = program_creatable=>default_temporary_package
+      importing
+        return_code               = return_code
+      ).
+    if return_code                gt 00.
+      return.
+    endif.
+  endmethod.
+endclass.
+class selection_processor              definition
+                                       final
+                                       create private
+                                       .
+  public section.
+    interfaces   : selection_processable
+                 .
+    aliases      : get_pc_directory
+                     for selection_processable~get_pc_directory
+                 .
+    class-data   : singleton      type ref
+                                    to selection_processor
+                 .
+    class-methods: class_constructor
+                 .
+endclass.
+class selection_processor              implementation.
+  method class_constructor.
+    create object selection_processor=>singleton.
+  endmethod.
+  method get_pc_directory.
+    constants    : directory_path_separator
+                                  type c length 01
+                                                 value '\'
+                 .
+    data         : directory_path type string
+                 , last_character_offset
+                                  type int4
+                 .
+    try.
+      cl_gui_frontend_services=>directory_browse(
+        changing
+          selected_folder          = directory_path
+        ).
+    catch cx_root ##CATCH_ALL ##NO_HANDLER.
+    endtry.
+    if directory_path is not initial.
+      directory                   = directory_path.
+      last_character_offset       = strlen( directory ) - 01.
+      if directory+last_character_offset(01)
+                                  ne directory_path_separator.
+        concatenate directory
+                    directory_path_separator
+               into directory.
+      endif.
+    endif.
+  endmethod.
+endclass.
+
+selection-screen : begin of block directry with frame title tdirectr.
+selection-screen :   comment 01(70) treposit.
+selection-screen :   begin of line.
+selection-screen :     comment 01(15) tpath.
+selection-screen :     position 20.
+parameters       :     directry   type source_code_retrievable=>directory.
+selection-screen :   end   of line.
+selection-screen : end   of block directry.
+selection-screen : begin of block pfxspec with frame title tpfxspec.
+selection-screen :   comment /01(70) tpfxdoc1.
+selection-screen :   comment /01(70) tpfxdoc2.
+selection-screen :   begin of line.
+selection-screen :     comment 01(15) tpfx.
+selection-screen :     position 20.
+parameters       :     progpfx    type source_code_uploadable=>program_name_prefix obligatory default 'ZAUT'.
+selection-screen :   end   of line.
+selection-screen : end   of block pfxspec.
+selection-screen : begin of block runopts with frame title trunopts.
+selection-screen :   begin of line.
+selection-screen :     comment 01(15) tupdate.
+selection-screen :     position 20.
+parameters       :     update     as checkbox.
+selection-screen :   end   of line.
+selection-screen : end   of block runopts.
+
+initialization.
+  tdirectr                        = 'Exercise program source repository'.
+  treposit                        = 'Specify the path to the folder where the exercises are located:'.
+  tpath                           = 'Path'.
+  tpfxspec                        = 'Exercise program prefix specification'.
+  tpfxdoc1                        = 'Exercise programs created in SAP will have the following'.
+  tpfxdoc2                        = '  value as the first 4 characters of their names:'.
+  tpfx                            = 'Name prefix'.
+  trunopts                        = 'Run options'.
+  tupdate                         = 'Update mode?'.
+
+at selection-screen on value-request for directry.
+    selection_processor=>singleton->get_pc_directory(
+      changing
+        directory                 = directry
+      ).
+
+start-of-selection.
+    source_code_uploader=>singleton->upload_all_source_code(
+      exporting
+        directory                 = directry
+        program_name_prefix       = progpfx
+        run_in_update_mode        = update
+      ).
